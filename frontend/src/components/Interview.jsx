@@ -1,12 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import axios from 'axios';
+import AnimatedAvatar from './AnimatedAvatar';
+import Feedback from './Feedback';
 
 const Interview = () => {
+    const location = useLocation();
+    const selectedRole = location.state?.role || 'Software Developer';
+
     const [messages, setMessages] = useState([
         {
             id: 1,
             role: 'assessor',
-            text: "Welcome. We are now commencing your formal assessment for the Software Developer position. We have reviewed your credentials. To begin, could you describe your technical journey and what drives your professional growth?"
+            text: `Welcome. We are now commencing your formal assessment for the ${selectedRole} position. We have reviewed your credentials. To begin, could you describe your technical journey and what drives your professional growth?`
         }
     ]);
     const [isListening, setIsListening] = useState(false);
@@ -15,10 +21,27 @@ const Interview = () => {
     const [isEvaluating, setIsEvaluating] = useState(false);
     const [evaluation, setEvaluation] = useState(null);
     const [transcript, setTranscript] = useState('');
+    const [currentAIMessage, setCurrentAIMessage] = useState('');
     const videoRef = useRef(null);
     const recognitionRef = useRef(null);
     const scrollRef = useRef(null);
     const sessionId = useRef(Math.random().toString(36).substring(7));
+
+    // Initialize session on mount
+    useEffect(() => {
+        const initSession = async () => {
+            try {
+                await axios.post('http://localhost:8080/api/init-session', {
+                    sessionId: sessionId.current,
+                    roleSelection: selectedRole
+                });
+                console.log('✅ Session initialized:', sessionId.current, 'Role:', selectedRole);
+            } catch (error) {
+                console.error('Failed to initialize session:', error);
+            }
+        };
+        initSession();
+    }, [selectedRole]);
 
     // Auto-scroll effect
     useEffect(() => {
@@ -30,6 +53,7 @@ const Interview = () => {
     // Handle initial greeting
     useEffect(() => {
         const timer = setTimeout(() => {
+            setCurrentAIMessage(messages[0].text);
             speak(messages[0].text);
         }, 1500);
         return () => clearTimeout(timer);
@@ -115,6 +139,7 @@ const Interview = () => {
                 text: res.data.response
             };
             setMessages(prev => [...prev, aiMsg]);
+            setCurrentAIMessage(res.data.response); // Set for avatar animation
 
             speak(res.data.response);
         } catch (err) {
@@ -166,56 +191,11 @@ const Interview = () => {
             {/* Main Content Container */}
             <div className="relative z-10 flex h-full items-center justify-center px-4 lg:px-8">
                 {evaluation ? (
-                    /* Evaluation Report View */
-                    <div className="w-full max-w-[1000px] animate-fade-in bg-[#121624]/60 border border-white/5 rounded-[40px] p-12 backdrop-blur-3xl shadow-2xl overflow-y-auto max-h-[85vh] scrollbar-hide">
-                        <div className="flex justify-between items-start mb-12">
-                            <div>
-                                <h1 className="text-5xl font-black tracking-tighter mb-2">ASSESSMENT REPORT</h1>
-                                <p className="text-[#5B5BFF] font-bold tracking-[0.3em] uppercase">HIREBRIDGE AI ANALYTICS</p>
-                            </div>
-                            <div className="text-right">
-                                <div className="text-6xl font-black text-[#5B5BFF]">{evaluation.score}</div>
-                                <div className="text-[10px] font-bold tracking-widest text-white/30 uppercase mt-1">PERCENTILE SCORE</div>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
-                            <div className="space-y-6">
-                                <h3 className="text-xs font-bold tracking-widest text-white/40 uppercase">Key Strengths</h3>
-                                <div className="space-y-3">
-                                    {evaluation.strengths.map((s, i) => (
-                                        <div key={i} className="flex items-center gap-3 bg-white/[0.03] p-4 rounded-2xl border border-white/5">
-                                            <div className="h-1.5 w-1.5 rounded-full bg-green-500"></div>
-                                            <span className="text-sm text-white/80">{s}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                            <div className="space-y-6">
-                                <h3 className="text-xs font-bold tracking-widest text-white/40 uppercase">Areas for Improvement</h3>
-                                <div className="space-y-3">
-                                    {evaluation.improvements.map((im, i) => (
-                                        <div key={i} className="flex items-center gap-3 bg-white/[0.03] p-4 rounded-2xl border border-white/5">
-                                            <div className="h-1.5 w-1.5 rounded-full bg-yellow-500"></div>
-                                            <span className="text-sm text-white/80">{im}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="bg-[#5B5BFF]/10 p-8 rounded-[32px] border border-[#5B5BFF]/20">
-                            <h3 className="text-xs font-bold tracking-widest text-[#5B5BFF] uppercase mb-4">Final Recommendation</h3>
-                            <p className="text-lg leading-relaxed text-white/90 italic">"{evaluation.recommendation}"</p>
-                        </div>
-
-                        <button
-                            onClick={() => window.location.href = '/home'}
-                            className="mt-12 w-full py-6 rounded-2xl bg-[#5B5BFF] text-white font-bold tracking-widest uppercase hover:bg-[#4263eb] transition-all"
-                        >
-                            Return to HQ
-                        </button>
-                    </div>
+                    /* New Professional Feedback Component */
+                    <Feedback
+                        evaluation={evaluation}
+                        onRestart={() => window.location.reload()}
+                    />
                 ) : (
                     <div className="flex w-full max-w-[1600px] h-[85vh] items-center justify-between gap-6">
 
@@ -252,17 +232,11 @@ const Interview = () => {
 
                                 {/* Center Panel — AI Assessor View */}
                                 <div className="relative h-[480px] w-full max-w-[480px] flex flex-col items-center justify-center rounded-[40px] border border-white/5 bg-[#121624]/40 shadow-2xl backdrop-blur-3xl animate-fade-in [animation-delay:150ms]">
-                                    {/* Avatar */}
-                                    <div className="flex h-48 w-48 items-center justify-center rounded-full bg-white/[0.03] border border-white/5 shadow-inner mb-6">
-                                        <div className="flex h-40 w-40 items-center justify-center rounded-full border border-white/10 bg-white/[0.02] shadow-2xl">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="currentColor" className="text-white/20">
-                                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z" />
-                                            </svg>
-                                        </div>
-                                    </div>
+                                    {/* Animated Avatar */}
+                                    <AnimatedAvatar text={currentAIMessage} isSpeaking={isSpeaking} />
 
                                     {/* Status & Branding */}
-                                    <div className="flex flex-col items-center gap-1">
+                                    <div className="flex flex-col items-center gap-1 mt-8">
                                         <div className="flex items-center gap-2 mb-2">
                                             <div className="flex items-end gap-[1px]">
                                                 <div className="w-1 h-2 bg-[#5B5BFF] rounded-sm animate-bounce" style={{ animationDelay: '0ms' }}></div>
