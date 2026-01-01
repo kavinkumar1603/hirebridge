@@ -31,6 +31,93 @@ app.get("/api/test", (req, res) => {
   res.json({ status: "ok", message: "Backend is running", timestamp: new Date().toISOString() });
 });
 
+// D-ID talking avatar proxy
+app.post("/api/did/talk", async (req, res) => {
+  try {
+    const { scriptText, avatarUrl } = req.body;
+
+    if (!scriptText || typeof scriptText !== "string") {
+      return res.status(400).json({ error: "scriptText is required" });
+    }
+
+    const didApiKey = process.env.DID_API_KEY;
+    if (!didApiKey) {
+      return res.status(500).json({ error: "D-ID API key not configured on server" });
+    }
+
+    // Support both plain API key ("key") and full basic credential ("user:key")
+    const credential = didApiKey.includes(":") ? didApiKey : `${didApiKey}:`;
+    const authHeader = `Basic ${Buffer.from(credential).toString("base64")}`;
+
+    const sourceUrl = avatarUrl || process.env.DID_AVATAR_URL || "https://create-images-results.d-id.com/default-presenter-image.jpg";
+
+    // Step 1: Create talk
+    const createResponse = await fetch("https://api.d-id.com/talks", {
+      method: "POST",
+      headers: {
+        Authorization: authHeader,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        script: {
+          type: "text",
+          input: scriptText,
+          provider: {
+            type: "microsoft",
+            voice_id: "en-US-JennyNeural",
+          },
+        },
+        config: {
+          fluent: true,
+          pad_audio: 0,
+        },
+        source_url: sourceUrl,
+      }),
+    });
+
+    const createData = await createResponse.json();
+    if (!createResponse.ok || !createData.id) {
+      console.error("D-ID create error:", createData);
+      return res.status(502).json({ error: "Failed to create D-ID talk", details: createData });
+    }
+
+    const talkId = createData.id;
+
+    // Step 2: Poll until video is ready
+    let videoUrl = null;
+    const maxAttempts = 20; // ~40s max
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      const statusResponse = await fetch(`https://api.d-id.com/talks/${talkId}`, {
+        headers: { Authorization: authHeader },
+      });
+
+      const statusData = await statusResponse.json();
+
+      if (statusData.status === "done" && statusData.result_url) {
+        videoUrl = statusData.result_url;
+        break;
+      }
+
+      if (statusData.status === "error") {
+        console.error("D-ID status error:", statusData);
+        return res.status(502).json({ error: "D-ID reported an error", details: statusData });
+      }
+    }
+
+    if (!videoUrl) {
+      return res.status(504).json({ error: "Timed out waiting for D-ID video" });
+    }
+
+    res.json({ videoUrl });
+  } catch (err) {
+    console.error("D-ID proxy error:", err);
+    res.status(500).json({ error: "Failed to generate avatar video" });
+  }
+});
+
 // Resume validation endpoint
 app.post("/api/validate-resume", upload.single("resume"), async (req, res) => {
   try {

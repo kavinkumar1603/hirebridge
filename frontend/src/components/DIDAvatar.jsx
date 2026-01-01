@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const DIDAvatar = ({ text, isSpeaking, onSpeakingComplete }) => {
+const DIDAvatar = ({ text, isSpeaking, onSpeakingComplete, avatarUrl }) => {
     const [videoUrl, setVideoUrl] = useState(null);
     const [isGenerating, setIsGenerating] = useState(false);
     const videoRef = useRef(null);
@@ -13,58 +13,30 @@ const DIDAvatar = ({ text, isSpeaking, onSpeakingComplete }) => {
 
     const generateVideo = async (inputText) => {
         setIsGenerating(true);
-
         try {
-            // Step 1: Create D-ID talk video
-            const response = await fetch('https://api.d-id.com/talks', {
+            const response = await fetch('http://localhost:8080/api/did/talk', {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Basic ${btoa('YOUR_D-ID_API_KEY')}`,
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    script: {
-                        type: 'text',
-                        input: inputText,
-                        provider: {
-                            type: 'microsoft',
-                            voice_id: 'en-US-JennyNeural' // Professional female voice
-                        }
-                    },
-                    config: {
-                        fluent: true,
-                        pad_audio: 0
-                    },
-                    source_url: 'https://create-images-results.d-id.com/default-presenter-image.jpg' // Default avatar
-                })
+                    scriptText: inputText,
+                    avatarUrl: avatarUrl || undefined,
+                }),
             });
 
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                console.error('Avatar generation failed:', errorData);
+                return;
+            }
+
             const data = await response.json();
-            const talkId = data.id;
-
-            // Step 2: Poll for video completion
-            let videoReady = false;
-            while (!videoReady) {
-                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
-
-                const statusResponse = await fetch(`https://api.d-id.com/talks/${talkId}`, {
-                    headers: {
-                        'Authorization': `Basic ${btoa('YOUR_D-ID_API_KEY')}`
-                    }
-                });
-
-                const statusData = await statusResponse.json();
-
-                if (statusData.status === 'done') {
-                    setVideoUrl(statusData.result_url);
-                    videoReady = true;
-                } else if (statusData.status === 'error') {
-                    console.error('Video generation failed:', statusData);
-                    break;
-                }
+            if (data.videoUrl) {
+                setVideoUrl(data.videoUrl);
             }
         } catch (error) {
-            console.error('D-ID API Error:', error);
+            console.error('Avatar API Error:', error);
         } finally {
             setIsGenerating(false);
         }
@@ -83,23 +55,28 @@ const DIDAvatar = ({ text, isSpeaking, onSpeakingComplete }) => {
     }, [videoUrl]);
 
     return (
-        <div className="relative flex flex-col items-center justify-center">
-            {isGenerating ? (
-                <div className="flex flex-col items-center gap-4">
-                    <div className="h-48 w-48 rounded-full bg-[#5B5BFF]/20 animate-pulse"></div>
-                    <p className="text-xs text-white/60">Generating avatar...</p>
+        <div className="relative w-full h-full">
+            {isGenerating && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className="w-20 h-20 rounded-full bg-[#5B5BFF]/30 animate-pulse mb-3"></div>
+                    <p className="text-xs text-white/70 tracking-wide">Preparing interviewer...</p>
                 </div>
-            ) : videoUrl ? (
+            )}
+
+            {videoUrl ? (
                 <video
                     ref={videoRef}
                     src={videoUrl}
-                    className="h-48 w-48 rounded-full object-cover border-4 border-[#5B5BFF]/30"
+                    className="w-full h-full object-cover"
                     muted={false}
+                    controls={false}
                 />
             ) : (
-                <div className="h-48 w-48 rounded-full bg-gradient-to-br from-[#5B5BFF]/20 to-[#8b5cf6]/20 border-2 border-[#5B5BFF]/30 flex items-center justify-center">
-                    <p className="text-xs text-white/40">Ready</p>
-                </div>
+                <img
+                    src={avatarUrl || '/interviewer_v3.png'}
+                    alt="AI Interviewer"
+                    className="w-full h-full object-cover"
+                />
             )}
         </div>
     );

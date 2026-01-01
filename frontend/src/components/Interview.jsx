@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import axios from 'axios';
-import AnimatedAvatar from './AnimatedAvatar';
+import DIDAvatar from './DIDAvatar';
 import Feedback from './Feedback';
 
 const Interview = () => {
@@ -53,7 +53,6 @@ const Interview = () => {
     // Handle initial greeting
     useEffect(() => {
         const timer = setTimeout(() => {
-            setCurrentAIMessage(messages[0].text);
             speak(messages[0].text);
         }, 1500);
         return () => clearTimeout(timer);
@@ -152,7 +151,6 @@ const Interview = () => {
 
     const handleFinishInterview = async () => {
         setIsEvaluating(true);
-        window.speechSynthesis.cancel();
         if (isListening) recognitionRef.current.stop();
 
         try {
@@ -168,14 +166,10 @@ const Interview = () => {
     };
 
     const speak = (text) => {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.onstart = () => setIsSpeaking(true);
-        utterance.onend = () => {
-            setIsSpeaking(false);
-            setTimeout(() => toggleListening(), 500);
-        };
-        window.speechSynthesis.speak(utterance);
+        // Clean text from animation cues before sending to avatar
+        const cleanText = text.replace(/\[.*?\]/g, '').trim();
+        setCurrentAIMessage(cleanText);
+        setIsSpeaking(true);
     };
 
     return (
@@ -231,23 +225,33 @@ const Interview = () => {
                                 </div>
 
                                 {/* Center Panel — AI Assessor View */}
-                                <div className="relative h-[480px] w-full max-w-[480px] flex flex-col items-center justify-center rounded-[40px] border border-white/5 bg-[#121624]/40 shadow-2xl backdrop-blur-3xl animate-fade-in [animation-delay:150ms]">
-                                    {/* Animated Avatar */}
-                                    <AnimatedAvatar text={currentAIMessage} isSpeaking={isSpeaking} />
+                                <div className="relative h-[480px] w-full max-w-[480px] flex flex-col justify-between rounded-[40px] border border-white/5 bg-[#121624]/40 shadow-2xl backdrop-blur-3xl animate-fade-in [animation-delay:150ms] overflow-hidden">
+                                    {/* Realistic D-ID Avatar fills panel */}
+                                    <div className="flex-1 w-full">
+                                        <DIDAvatar
+                                            text={currentAIMessage}
+                                            isSpeaking={isSpeaking}
+                                            avatarUrl={undefined}
+                                            onSpeakingComplete={() => {
+                                                setIsSpeaking(false);
+                                                setTimeout(() => toggleListening(), 1000);
+                                            }}
+                                        />
+                                    </div>
 
                                     {/* Status & Branding */}
-                                    <div className="flex flex-col items-center gap-1 mt-8">
+                                    <div className="flex flex-col items-center gap-1 py-6 bg-gradient-to-t from-black/40 via-black/10 to-transparent">
                                         <div className="flex items-center gap-2 mb-2">
                                             <div className="flex items-end gap-[1px]">
                                                 <div className="w-1 h-2 bg-[#5B5BFF] rounded-sm animate-bounce" style={{ animationDelay: '0ms' }}></div>
                                                 <div className="w-1 h-3 bg-[#5B5BFF] rounded-sm animate-bounce" style={{ animationDelay: '150ms' }}></div>
                                                 <div className="w-1 h-1 bg-[#5B5BFF] rounded-sm animate-bounce" style={{ animationDelay: '300ms' }}></div>
                                             </div>
-                                            <span className="text-[10px] font-bold tracking-[0.2em] text-white/30 uppercase">SIGNAL LOCKED</span>
+                                            <span className="text-[10px] font-bold tracking-[0.2em] text-white/30 uppercase">LIVE CONNECTION</span>
                                         </div>
-                                        <h2 className="text-4xl font-black tracking-tighter text-white/90">AI ASSESSOR</h2>
+                                        <h2 className="text-4xl font-black tracking-tighter text-white/90">LEAD INTERVIEWER</h2>
                                         <span className="text-[11px] font-medium tracking-[0.4em] text-[#5B5BFF] uppercase">
-                                            {isSpeaking ? 'TRANSMITTING VOICE...' : 'CORPORATE PARTNER V4.0'}
+                                            {isSpeaking ? 'TRANSMITTING VOICE...' : 'ELITE ASSESSMENT PROTOCOL'}
                                         </span>
                                     </div>
                                 </div>

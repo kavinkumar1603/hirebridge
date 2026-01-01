@@ -1,245 +1,196 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const AnimatedAvatar = ({ text, isSpeaking }) => {
-    const [currentExpression, setCurrentExpression] = useState('neutral');
-    const [currentGesture, setCurrentGesture] = useState('idle');
+const AnimatedAvatar = ({ text, isSpeaking, currentCharIndex }) => {
     const [isBlinking, setIsBlinking] = useState(false);
-    const [mouthOpenness, setMouthOpenness] = useState(0);
-    const blinkIntervalRef = useRef(null);
-    const mouthAnimationRef = useRef(null);
+    const [visemeIndex, setVisemeIndex] = useState(0);
+    const [transform, setTransform] = useState({ x: 0, y: 0, r: 0, s: 1 });
+    const [breathing, setBreathing] = useState(0);
+    const audioSyncRef = useRef(null);
+    const lastWordRef = useRef('');
 
-    // Version check
+    // 3x3 Grid Mapping
+    const visemeMap = [
+        { row: 0, col: 0 }, // 0: Neutral
+        { row: 0, col: 1 }, // 1: Ah (Open)
+        { row: 0, col: 2 }, // 2: Oh (Round)
+        { row: 1, col: 1 }, // 3: Oo (Pucker)
+        { row: 1, col: 0 }, // 4: Ee (Wide)
+        { row: 1, col: 2 }, // 5: Mid/Dental
+        { row: 2, col: 0 }, // 6: F/V (Labiodental)
+        { row: 2, col: 1 }, // 7: M/P/B (Pressed)
+        { row: 2, col: 2 }, // 8: Smile (End)
+    ];
+
+    // Natural idle breathing & blinking
     useEffect(() => {
-        console.log('🎭 Professional Avatar v2.0 Loaded - With Natural Blinking & Dynamic Lip-Sync');
-    }, []);
-
-    // Natural random blinking (every 3-5 seconds)
-    useEffect(() => {
-        const startBlinking = () => {
-            const blink = () => {
-                setIsBlinking(true);
-                setTimeout(() => setIsBlinking(false), 150); // Quick blink
-
-                // Schedule next blink randomly between 3-5 seconds
-                const nextBlinkDelay = 3000 + Math.random() * 2000;
-                blinkIntervalRef.current = setTimeout(blink, nextBlinkDelay);
-            };
-
-            // Start first blink after 2 seconds
-            blinkIntervalRef.current = setTimeout(blink, 2000);
+        let blinkTimeout;
+        const blink = () => {
+            setIsBlinking(true);
+            setTimeout(() => setIsBlinking(false), 120);
+            blinkTimeout = setTimeout(blink, 3000 + Math.random() * 4000);
         };
+        blink();
 
-        startBlinking();
+        const breatheInterval = setInterval(() => {
+            setBreathing(prev => (prev + 0.05) % (Math.PI * 2));
+        }, 30);
 
         return () => {
-            if (blinkIntervalRef.current) {
-                clearTimeout(blinkIntervalRef.current);
-            }
+            clearTimeout(blinkTimeout);
+            clearInterval(breatheInterval);
         };
     }, []);
 
-    // Realistic lip-sync animation
+    // Syllable-Driven Viseme Engine
     useEffect(() => {
-        if (isSpeaking) {
-            let frame = 0;
-            const animate = () => {
-                // Create natural mouth movement pattern
-                const pattern = [0.3, 0.6, 0.4, 0.7, 0.5, 0.8, 0.4, 0.6, 0.3, 0.5];
-                setMouthOpenness(pattern[frame % pattern.length]);
-                frame++;
-                mouthAnimationRef.current = setTimeout(animate, 100); // 10fps for natural speech
+        if (!isSpeaking || currentCharIndex === -1 || !text) {
+            // Smooth transition back to neutral/smile
+            const timeout = setTimeout(() => setVisemeIndex(text ? 8 : 0), 200);
+            return () => clearTimeout(timeout);
+        }
+
+        const currentWord = text.substring(currentCharIndex).split(' ')[0].toLowerCase().replace(/[.,!?]/g, '');
+        if (currentWord === lastWordRef.current) return;
+        lastWordRef.current = currentWord;
+
+        // Phoneme extraction logic
+        const playPhonemes = async () => {
+            const phonemes = [];
+            for (let i = 0; i < currentWord.length; i++) {
+                const char = currentWord[i];
+                const next = currentWord[i + 1];
+
+                if (['a', 'e', 'i'].includes(char)) phonemes.push(1);
+                else if (['o'].includes(char)) phonemes.push(2);
+                else if (['u', 'w'].includes(char)) phonemes.push(3);
+                else if (['f', 'v'].includes(char)) phonemes.push(6);
+                else if (['m', 'p', 'b'].includes(char)) phonemes.push(7);
+                else if (['s', 'z', 'l', 't', 'd'].includes(char)) phonemes.push(5);
+                else phonemes.push(4);
+            }
+
+            // High-speed syllable reproduction
+            let pIndex = 0;
+            const step = () => {
+                if (pIndex >= phonemes.length || !isSpeaking) return;
+
+                const target = phonemes[pIndex];
+                setVisemeIndex(target);
+
+                // Audio-reactive micro-movements (Head nods on stress)
+                if (target === 1 || target === 2) {
+                    setTransform(prev => ({
+                        ...prev,
+                        y: 1.5, // Natural jaw drop micro-nod
+                        s: 1.01 // Cheek expansion
+                    }));
+                } else {
+                    setTransform(prev => ({ ...prev, y: 0, s: 1 }));
+                }
+
+                pIndex++;
+                setTimeout(step, 60 + Math.random() * 30); // Dynamic phoneme duration
             };
-            animate();
-        } else {
-            setMouthOpenness(0);
-            if (mouthAnimationRef.current) {
-                clearTimeout(mouthAnimationRef.current);
-            }
-        }
-
-        return () => {
-            if (mouthAnimationRef.current) {
-                clearTimeout(mouthAnimationRef.current);
-            }
+            step();
         };
-    }, [isSpeaking]);
 
-    // Parse cues from text with priority system
-    useEffect(() => {
-        if (!text) return;
+        playPhonemes();
 
-        // Parse all cues
-        const smileMatch = text.match(/\[smiles?\s+(warmly|approvingly)\]/i);
-        const nodMatch = text.match(/\[nods?\s+slightly\]/i);
-        const gestureMatch = text.match(/\[gestures?\s+with\s+hand\]/i);
-        const leanMatch = text.match(/\[leans?\s+forward\]/i);
+    }, [currentCharIndex, isSpeaking, text]);
 
-        // Priority 1: Facial Expression (immediate)
-        if (smileMatch) {
-            setCurrentExpression('smile');
-            setTimeout(() => setCurrentExpression('neutral'), 2500);
-        }
-
-        // Priority 2: Head Movement (after 300ms)
-        if (nodMatch) {
-            setTimeout(() => {
-                setCurrentGesture('nod');
-                setTimeout(() => setCurrentGesture('idle'), 800);
-            }, 300);
-        }
-
-        // Priority 3: Hand Gesture (after 600ms, only if no other gesture active)
-        if (gestureMatch && !nodMatch) {
-            setTimeout(() => {
-                setCurrentGesture('gesture');
-                setTimeout(() => setCurrentGesture('idle'), 1500);
-            }, 600);
-        }
-
-        // Priority 4: Lean (subtle, can combine with others)
-        if (leanMatch) {
-            setTimeout(() => {
-                setCurrentGesture('lean');
-                setTimeout(() => setCurrentGesture('idle'), 2000);
-            }, 400);
-        }
-    }, [text]);
+    const currentPos = visemeMap[visemeIndex];
 
     return (
-        <>
-            <div className="relative flex flex-col items-center justify-center">
-                {/* Avatar Container with smooth transitions */}
-                <div className={`relative transition-all duration-700 ease-out ${currentGesture === 'lean' ? 'scale-105' : 'scale-100'
-                    } ${currentGesture === 'nod' ? 'avatar-nod' : ''}`}>
+        <div className="relative w-full h-full flex items-center justify-center rounded-[40px] overflow-hidden shadow-2xl bg-[#06080E]">
+            {/* The Spritesheet Container */}
+            <div
+                className="absolute w-[300%] h-[300%] transition-opacity duration-300"
+                style={{
+                    top: `-${currentPos.row * 100}%`,
+                    left: `-${currentPos.col * 100}%`,
+                    transform: `
+                        scale(${(1.02 + Math.sin(breathing) * 0.003) * transform.s}) 
+                        translateY(${transform.y}px)
+                        rotate(${Math.sin(breathing * 0.5) * 0.1}deg)
+                    `,
+                    transition: 'top 0.05s steps(1), left 0.05s steps(1), transform 0.1s ease-out'
+                }}
+            >
+                <img
+                    src="/interviewer_v3.png"
+                    alt="AI Interviewer"
+                    className="w-full h-full object-cover contrast-[1.08] brightness-[1.02] saturate-[1.05]"
+                />
+            </div>
 
-                    {/* Outer Professional Glow */}
-                    <div className={`absolute inset-0 rounded-full transition-all duration-500 ${isSpeaking
-                        ? 'bg-[#5B5BFF]/25 blur-3xl'
-                        : 'bg-[#5B5BFF]/10 blur-2xl'
-                        }`}></div>
+            {/* Realistic Blinking Overlay (Perfectly synced with base image) */}
+            <div className="absolute inset-0 pointer-events-none z-10">
+                {/* Left Eyelid */}
+                <div
+                    className="absolute transition-all duration-100 ease-out"
+                    style={{
+                        top: '29.4%', left: '43.1%', width: '3.9%',
+                        height: isBlinking ? '1.8%' : '0%',
+                        background: 'rgba(45, 35, 30, 0.98)',
+                        borderRadius: '100%', filter: 'blur(2px)',
+                        transform: `scale(${transform.s})`
+                    }}
+                />
+                {/* Right Eyelid */}
+                <div
+                    className="absolute transition-all duration-100 ease-out"
+                    style={{
+                        top: '29.4%', left: '52.7%', width: '3.9%',
+                        height: isBlinking ? '1.8%' : '0%',
+                        background: 'rgba(45, 35, 30, 0.98)',
+                        borderRadius: '100%', filter: 'blur(2px)',
+                        transform: `scale(${transform.s})`
+                    }}
+                />
+            </div>
 
-                    {/* Main Avatar Circle - Professional Design */}
-                    <div className="relative flex h-56 w-56 items-center justify-center rounded-full bg-gradient-to-br from-[#4263eb]/30 via-[#5B5BFF]/20 to-[#7c3aed]/30 border-[3px] border-[#5B5BFF]/40 shadow-2xl backdrop-blur-sm">
+            {/* Cinematic Lighting & Polish */}
+            <div className="absolute inset-0 pointer-events-none z-20">
+                {/* Shallow depth of field simulation */}
+                <div className="absolute inset-0 bg-radial-vignette opacity-40"></div>
 
-                        {/* Professional Face Structure */}
-                        <div className="relative w-40 h-40">
-                            {/* Head/Face Base */}
-                            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-36 bg-gradient-to-b from-[#5B5BFF]/50 to-[#5B5BFF]/25 rounded-full"></div>
+                {/* Professional Spotlight */}
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-radial-spotlight"></div>
 
-                            {/* Eyes - Natural and Expressive */}
-                            <div className="absolute top-10 left-1/2 -translate-x-1/2 flex gap-8">
-                                {/* Left Eye */}
-                                <div className={`relative transition-all duration-200 ${isBlinking ? 'h-1' : 'h-4'
-                                    } w-4 bg-white rounded-full ${currentExpression === 'smile' ? 'scale-90' : 'scale-100'
-                                    }`}>
-                                    {/* Pupil */}
-                                    {!isBlinking && (
-                                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-[#1e293b] rounded-full"></div>
-                                    )}
-                                </div>
+                {/* Grain for film-like texture */}
+                <div className="absolute inset-0 opacity-[0.03] bg-noise pointer-events-none"></div>
+            </div>
 
-                                {/* Right Eye */}
-                                <div className={`relative transition-all duration-200 ${isBlinking ? 'h-1' : 'h-4'
-                                    } w-4 bg-white rounded-full ${currentExpression === 'smile' ? 'scale-90' : 'scale-100'
-                                    }`}>
-                                    {/* Pupil */}
-                                    {!isBlinking && (
-                                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-[#1e293b] rounded-full"></div>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Mouth - Realistic Lip-Sync */}
-                            <div className="absolute top-20 left-1/2 -translate-x-1/2 transition-all duration-100">
-                                {isSpeaking ? (
-                                    // Talking - dynamic mouth
-                                    <div
-                                        className="border-2 border-white rounded-full transition-all duration-100"
-                                        style={{
-                                            width: `${32 + mouthOpenness * 8}px`,
-                                            height: `${12 + mouthOpenness * 8}px`
-                                        }}
-                                    ></div>
-                                ) : currentExpression === 'smile' ? (
-                                    // Warm professional smile
-                                    <div className="w-12 h-4 border-b-[3px] border-white rounded-b-full"></div>
-                                ) : (
-                                    // Neutral - calm, closed mouth
-                                    <div className="w-8 h-[2px] bg-white/60 rounded-full"></div>
-                                )}
-                            </div>
-
-                            {/* Subtle Eyebrows for Expression */}
-                            <div className="absolute top-8 left-1/2 -translate-x-1/2 flex gap-8">
-                                <div className={`w-5 h-[2px] bg-white/40 rounded-full transition-all duration-300 ${currentExpression === 'smile' ? 'rotate-6' : 'rotate-0'
-                                    }`}></div>
-                                <div className={`w-5 h-[2px] bg-white/40 rounded-full transition-all duration-300 ${currentExpression === 'smile' ? '-rotate-6' : 'rotate-0'
-                                    }`}></div>
-                            </div>
-                        </div>
-
-                        {/* Professional Hand Gesture - Subtle and Natural */}
-                        {currentGesture === 'gesture' && (
-                            <div className="absolute -right-10 top-1/2 -translate-y-1/2 avatar-wave opacity-80">
-                                <div className="w-14 h-20 bg-gradient-to-br from-[#5B5BFF]/50 to-[#7c3aed]/40 rounded-xl rotate-12 shadow-lg"></div>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Professional Speaking Indicator - Sound Waves */}
-                    {isSpeaking && (
-                        <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 flex gap-1.5">
-                            {[0, 1, 2, 3, 4].map((i) => (
-                                <div
-                                    key={i}
-                                    className="w-1.5 bg-gradient-to-t from-[#5B5BFF] to-[#7c3aed] rounded-full avatar-soundwave shadow-lg"
-                                    style={{
-                                        height: '20px',
-                                        animationDelay: `${i * 0.12}s`
-                                    }}
-                                ></div>
-                            ))}
-                        </div>
-                    )}
+            {/* Frame & Status Signal */}
+            <div className="absolute inset-x-0 top-8 flex justify-center z-30 opacity-60">
+                <div className="flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-black/40 backdrop-blur-md">
+                    <div className={`h-1.5 w-1.5 rounded-full ${isSpeaking ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`}></div>
+                    <span className="text-[9px] font-bold tracking-widest text-white/70 uppercase">
+                        {isSpeaking ? 'Direct Audio Stream' : 'Connection Active'}
+                    </span>
                 </div>
             </div>
 
-            {/* Professional Animation Styles */}
             <style dangerouslySetInnerHTML={{
                 __html: `
-                    @keyframes avatarNod {
-                        0%, 100% { transform: translateY(0) rotate(0deg); }
-                        50% { transform: translateY(10px) rotate(2deg); }
-                    }
-                    @keyframes avatarWave {
-                        0%, 100% { transform: rotate(12deg) translateX(0); }
-                        25% { transform: rotate(-8deg) translateX(-2px); }
-                        75% { transform: rotate(15deg) translateX(2px); }
-                    }
-                    @keyframes avatarSoundwave {
-                        0%, 100% { 
-                            height: 12px; 
-                            opacity: 0.6; 
-                            transform: scaleY(0.6);
-                        }
-                        50% { 
-                            height: 28px; 
-                            opacity: 1; 
-                            transform: scaleY(1);
-                        }
-                    }
-                    .avatar-nod {
-                        animation: avatarNod 0.6s ease-in-out;
-                    }
-                    .avatar-wave {
-                        animation: avatarWave 1.2s ease-in-out infinite;
-                    }
-                    .avatar-soundwave {
-                        animation: avatarSoundwave 0.5s ease-in-out infinite;
-                    }
-                `
-            }} />
-        </>
+                .bg-radial-vignette {
+                    background: radial-gradient(circle at center, transparent 30%, rgba(0,0,0,0.6) 100%);
+                }
+                .bg-radial-spotlight {
+                    background: radial-gradient(circle at center, rgba(91, 91, 255, 0.08) 0%, transparent 60%);
+                }
+                .bg-noise {
+                    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+                }
+                @keyframes waveform {
+                    0%, 100% { transform: scaleY(0.6); opacity: 0.4; }
+                    50% { transform: scaleY(1.4); opacity: 0.8; }
+                }
+                .animate-waveform {
+                    animation: waveform 0.2s ease-in-out infinite;
+                }
+            `}} />
+        </div>
     );
 };
 
