@@ -8,13 +8,7 @@ const Interview = () => {
     const location = useLocation();
     const selectedRole = location.state?.role || 'Software Developer';
 
-    const [messages, setMessages] = useState([
-        {
-            id: 1,
-            role: 'assessor',
-            text: `Welcome. We are now commencing your formal assessment for the ${selectedRole} position. We have reviewed your credentials. To begin, could you describe your technical journey and what drives your professional growth?`
-        }
-    ]);
+    const [messages, setMessages] = useState([]);
     const [isListening, setIsListening] = useState(false);
     const [isThinking, setIsThinking] = useState(false);
     const [isSpeaking, setIsSpeaking] = useState(false);
@@ -25,22 +19,52 @@ const Interview = () => {
     const videoRef = useRef(null);
     const recognitionRef = useRef(null);
     const scrollRef = useRef(null);
-    const sessionId = useRef(Math.random().toString(36).substring(7));
+    const sessionId = useRef(null);
 
-    // Initialize session on mount
+    // Start or resume interview on mount / role change
     useEffect(() => {
-        const initSession = async () => {
+        const startInterview = async () => {
             try {
-                await axios.post('http://localhost:8080/api/init-session', {
-                    sessionId: sessionId.current,
-                    roleSelection: selectedRole
-                });
-                console.log('✅ Session initialized:', sessionId.current, 'Role:', selectedRole);
+                const storageKey = 'hirebridge_interview_id';
+                const existing = typeof window !== 'undefined'
+                    ? window.localStorage.getItem(storageKey)
+                    : null;
+
+                const body = {
+                    role: selectedRole,
+                    interviewId: existing || null,
+                };
+
+                const res = await axios.post('/api/questions/start', body);
+                const { interviewId, question } = res.data;
+
+                sessionId.current = interviewId;
+                if (typeof window !== 'undefined') {
+                    window.localStorage.setItem(storageKey, interviewId);
+                }
+
+                const openingMsg = {
+                    id: Date.now(),
+                    role: 'assessor',
+                    text: question,
+                };
+                setMessages([openingMsg]);
+                speak(question);
             } catch (error) {
-                console.error('Failed to initialize session:', error);
+                console.error('Failed to start interview:', error);
+                const fallback = 'Welcome to HireBridge. Let’s begin with a quick introduction. Could you briefly walk me through your background for this role?';
+                const openingMsg = {
+                    id: Date.now(),
+                    role: 'assessor',
+                    text: fallback,
+                };
+                setMessages([openingMsg]);
+                speak(fallback);
             }
         };
-        initSession();
+
+        startInterview();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedRole]);
 
     // Auto-scroll effect
@@ -50,13 +74,40 @@ const Interview = () => {
         }
     }, [messages, transcript]);
 
-    // Handle initial greeting
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            speak(messages[0].text);
-        }, 1500);
-        return () => clearTimeout(timer);
-    }, []);
+    // Fetch next dynamic question based on last answer
+    const fetchNextQuestion = async (lastAnswer = null) => {
+        try {
+            if (!sessionId.current) {
+                return;
+            }
+
+            const res = await axios.post('/api/questions/next', {
+                interviewId: sessionId.current,
+                role: selectedRole,
+                lastAnswer,
+            });
+
+            const { question } = res.data;
+            const aiMsg = {
+                id: Date.now(),
+                role: 'assessor',
+                text: question,
+            };
+
+            setMessages(prev => [...prev, aiMsg]);
+            speak(question);
+        } catch (error) {
+            console.error('Failed to fetch next question:', error);
+            // Graceful fallback so the UI never crashes
+            const fallbackMsg = {
+                id: Date.now(),
+                role: 'assessor',
+                text: 'I’m experiencing a technical issue generating the next question. Let’s pause here for a moment.',
+            };
+            setMessages(prev => [...prev, fallbackMsg]);
+            speak(fallbackMsg.text);
+        }
+    };
 
     // Initialize Camera
     useEffect(() => {
@@ -127,20 +178,9 @@ const Interview = () => {
         setMessages(prev => [...prev, userMsg]);
 
         try {
-            const res = await axios.post('http://localhost:8080/api/chat', {
-                sessionId: sessionId.current,
-                message: text
-            });
-
-            const aiMsg = {
-                id: Date.now() + 1,
-                role: 'assessor',
-                text: res.data.response
-            };
-            setMessages(prev => [...prev, aiMsg]);
-            setCurrentAIMessage(res.data.response); // Set for avatar animation
-
-            speak(res.data.response);
+            // Pass the latest user answer so the backend (Gemini)
+            // can generate an adaptive follow-up question.
+            await fetchNextQuestion(text);
         } catch (err) {
             console.error("API Error:", err);
         } finally {
@@ -154,7 +194,11 @@ const Interview = () => {
         if (isListening) recognitionRef.current.stop();
 
         try {
-            const res = await axios.post('http://localhost:8080/api/evaluate', {
+            if (!sessionId.current) {
+                setIsEvaluating(false);
+                return;
+            }
+            const res = await axios.post('/api/evaluate', {
                 sessionId: sessionId.current
             });
             setEvaluation(res.data);

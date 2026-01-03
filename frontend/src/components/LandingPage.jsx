@@ -55,7 +55,7 @@ const LandingPage = () => {
                 <div className="animate-fade-in [animation-delay:800ms]">
                     <button
                         className="glow-on-hover group relative flex items-center justify-center overflow-hidden rounded-full bg-white px-10 py-4 transition-all duration-300 cursor-pointer"
-                        onClick={() => navigate('/home')}
+                        onClick={() => navigate('/login')}
                     >
                         <span className="text-sm font-bold tracking-widest text-black">ENTER ASSESSMENT STUDIO</span>
                     </button>

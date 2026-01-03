@@ -5,6 +5,7 @@ const multer = require("multer");
 const pdf = require("pdf-parse");
 require("dotenv").config();
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { generateNextQuestion } = require("./questions");
 
 const app = express();
 app.use(cors());
@@ -21,6 +22,8 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "AIzaSyCV3lHF
 
 // Store session history (In-memory for demo, should be DB in production)
 const sessions = {};
+// Store interview sessions with questions and answers
+const interviewSessions = {};
 
 app.get("/", (req, res) => {
   res.send("HireBridge AI Backend is working 🚀");
@@ -42,7 +45,11 @@ app.post("/api/did/talk", async (req, res) => {
 
     const didApiKey = process.env.DID_API_KEY;
     if (!didApiKey) {
-      return res.status(500).json({ error: "D-ID API key not configured on server" });
+      console.error("❌ D-ID API key not configured");
+      return res.status(500).json({ 
+        error: "D-ID API key not configured on server",
+        hint: "Please add DID_API_KEY to your .env file"
+      });
     }
 
     // Support both plain API key ("key") and full basic credential ("user:key")
@@ -50,6 +57,8 @@ app.post("/api/did/talk", async (req, res) => {
     const authHeader = `Basic ${Buffer.from(credential).toString("base64")}`;
 
     const sourceUrl = avatarUrl || process.env.DID_AVATAR_URL || "https://create-images-results.d-id.com/default-presenter-image.jpg";
+
+    console.log("🎬 Creating D-ID talk...");
 
     // Step 1: Create talk
     const createResponse = await fetch("https://api.d-id.com/talks", {
@@ -76,12 +85,34 @@ app.post("/api/did/talk", async (req, res) => {
     });
 
     const createData = await createResponse.json();
-    if (!createResponse.ok || !createData.id) {
-      console.error("D-ID create error:", createData);
-      return res.status(502).json({ error: "Failed to create D-ID talk", details: createData });
+    
+    if (!createResponse.ok) {
+      console.error("❌ D-ID create error:", createData);
+      
+      // Handle authentication errors specifically
+      if (createResponse.status === 401 || createResponse.status === 403) {
+        return res.status(502).json({ 
+          error: "D-ID authentication failed. Please check your API key.",
+          details: createData 
+        });
+      }
+      
+      return res.status(502).json({ 
+        error: "Failed to create D-ID talk", 
+        details: createData 
+      });
+    }
+
+    if (!createData.id) {
+      console.error("❌ D-ID response missing talk ID:", createData);
+      return res.status(502).json({ 
+        error: "D-ID response invalid - no talk ID",
+        details: createData 
+      });
     }
 
     const talkId = createData.id;
+    console.log(`✅ D-ID talk created: ${talkId}`);
 
     // Step 2: Poll until video is ready
     let videoUrl = null;
@@ -95,26 +126,196 @@ app.post("/api/did/talk", async (req, res) => {
       });
 
       const statusData = await statusResponse.json();
+      console.log(`📊 D-ID status (attempt ${attempt + 1}): ${statusData.status}`);
 
       if (statusData.status === "done" && statusData.result_url) {
         videoUrl = statusData.result_url;
+        console.log("✅ D-ID video ready");
         break;
       }
 
       if (statusData.status === "error") {
-        console.error("D-ID status error:", statusData);
+        console.error("❌ D-ID status error:", statusData);
         return res.status(502).json({ error: "D-ID reported an error", details: statusData });
       }
     }
 
     if (!videoUrl) {
+      console.error("⏱️ D-ID video generation timed out");
       return res.status(504).json({ error: "Timed out waiting for D-ID video" });
     }
 
     res.json({ videoUrl });
   } catch (err) {
-    console.error("D-ID proxy error:", err);
-    res.status(500).json({ error: "Failed to generate avatar video" });
+    console.error("❌ D-ID proxy error:", err);
+    res.status(500).json({ 
+      error: "Failed to generate avatar video",
+      message: err.message 
+    });
+  }
+});
+
+// Interview Questions API - Start or resume interview
+app.post("/api/questions/start", (req, res) => {
+  try {
+    const { role, interviewId } = req.body;
+
+    // Check if existing interview session
+    if (interviewId && interviewSessions[interviewId]) {
+      const session = interviewSessions[interviewId];
+      console.log(`📌 Resuming interview session: ${interviewId}`);
+      
+      // Return the current unanswered question if available
+      const currentQuestion = session.history[session.currentQuestionIndex];
+      
+      if (currentQuestion && !currentQuestion.answer) {
+        return res.json({
+          interviewId,
+          question: currentQuestion.question,
+          questionNumber: session.currentQuestionIndex + 1,
+        });
+      }
+    }
+
+    // Create new interview session
+    const newInterviewId = interviewId || `interview_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    
+    // Generate first question
+    const firstQ = generateNextQuestion({ role: role || "Software Developer" });
+    
+    interviewSessions[newInterviewId] = {
+      role: role || "Software Developer",
+      history: [{
+        question: firstQ.question,
+        topic: firstQ.topic_tag,
+        difficulty: firstQ.next_question_difficulty,
+        timestamp: Date.now(),
+      }],
+      currentQuestionIndex: 0,
+      askedTopics: [firstQ.topic_tag],
+      startTime: Date.now(),
+    };
+
+    console.log(`✅ New interview started: ${newInterviewId} for role: ${role}`);
+    console.log(`📝 First question (${firstQ.next_question_difficulty}): ${firstQ.topic_tag}`);
+
+    res.json({
+      interviewId: newInterviewId,
+      question: firstQ.question,
+      questionNumber: 1,
+    });
+  } catch (error) {
+    console.error("❌ Error starting interview:", error);
+    res.status(500).json({ 
+      error: "Failed to start interview",
+      message: error.message 
+    });
+  }
+});
+
+// Interview Questions API - Get next question
+app.post("/api/questions/next", async (req, res) => {
+  try {
+    const { interviewId, role, lastAnswer } = req.body;
+
+    if (!interviewId || !interviewSessions[interviewId]) {
+      return res.status(400).json({ error: "Invalid interview session" });
+    }
+
+    const session = interviewSessions[interviewId];
+    const currentQuestion = session.history[session.currentQuestionIndex];
+    
+    // If there's no answer provided, return the current question
+    if (!lastAnswer || !lastAnswer.trim()) {
+      console.log(`⚠️ No answer provided, returning current question`);
+      return res.json({
+        question: currentQuestion.question,
+        questionNumber: session.currentQuestionIndex + 1,
+      });
+    }
+
+    // Check if current question already has an answer (prevent duplicate processing)
+    if (currentQuestion.answer) {
+      console.log(`⚠️ Question already answered, moving to next`);
+      // Find the next unanswered question or generate new one
+      session.currentQuestionIndex++;
+      
+      if (session.currentQuestionIndex < session.history.length) {
+        const nextExisting = session.history[session.currentQuestionIndex];
+        return res.json({
+          question: nextExisting.question,
+          questionNumber: session.currentQuestionIndex + 1,
+        });
+      }
+    }
+    
+    // Score the last answer using AI
+    let score = 5; // Default score
+    try {
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      
+      const scorePrompt = `Rate this interview answer on a scale of 1-10:
+Question: ${currentQuestion.question}
+Answer: ${lastAnswer}
+
+Provide only a number between 1-10. Consider:
+- Technical accuracy
+- Depth of understanding
+- Communication clarity
+- Relevance to the question
+
+Response format: Just the number (e.g., 7)`;
+
+      const result = await model.generateContent(scorePrompt);
+      const scoreText = result.response.text().trim();
+      score = parseInt(scoreText.match(/\d+/)?.[0] || "5");
+      score = Math.max(1, Math.min(10, score)); // Clamp between 1-10
+      
+      console.log(`📊 Answer scored: ${score}/10 for topic: ${currentQuestion.topic}`);
+    } catch (scoreError) {
+      console.error("⚠️ Failed to score answer:", scoreError.message);
+    }
+
+    // Store the answer with score
+    currentQuestion.answer = lastAnswer;
+    currentQuestion.score = score;
+    currentQuestion.answeredAt = Date.now();
+
+    // Generate next question based on performance, avoiding recently asked topics
+    const nextQ = generateNextQuestion({
+      role: session.role,
+      lastScore: score,
+      lastTopic: currentQuestion.topic,
+    });
+
+    // Make sure we don't repeat the same topic consecutively
+    session.askedTopics = session.askedTopics || [];
+    session.askedTopics.push(nextQ.topic_tag);
+
+    // Move to next question index
+    session.currentQuestionIndex++;
+
+    // Add to history
+    session.history.push({
+      question: nextQ.question,
+      topic: nextQ.topic_tag,
+      difficulty: nextQ.next_question_difficulty,
+      timestamp: Date.now(),
+    });
+
+    console.log(`✅ Question ${session.currentQuestionIndex + 1} generated (${nextQ.next_question_difficulty}): ${nextQ.topic_tag}`);
+    console.log(`📋 Topics asked so far: ${session.askedTopics.join(', ')}`);
+
+    res.json({
+      question: nextQ.question,
+      questionNumber: session.currentQuestionIndex + 1,
+    });
+  } catch (error) {
+    console.error("❌ Error generating next question:", error);
+    res.status(500).json({ 
+      error: "Failed to generate next question",
+      message: error.message 
+    });
   }
 });
 

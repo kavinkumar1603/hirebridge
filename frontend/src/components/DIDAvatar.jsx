@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
+import axios from 'axios';
 
 const DIDAvatar = ({ text, isSpeaking, onSpeakingComplete, avatarUrl }) => {
     const [videoUrl, setVideoUrl] = useState(null);
     const [isGenerating, setIsGenerating] = useState(false);
+    const [hasError, setHasError] = useState(false);
     const videoRef = useRef(null);
 
     useEffect(() => {
@@ -11,32 +13,72 @@ const DIDAvatar = ({ text, isSpeaking, onSpeakingComplete, avatarUrl }) => {
         }
     }, [text, isSpeaking]);
 
+    const speakWithTTS = (inputText) => {
+        if (typeof window === 'undefined') {
+            if (onSpeakingComplete) onSpeakingComplete();
+            return;
+        }
+
+        const synth = window.speechSynthesis;
+        const Utterance = window.SpeechSynthesisUtterance;
+
+        if (!synth || !Utterance) {
+            if (onSpeakingComplete) onSpeakingComplete();
+            return;
+        }
+
+        try {
+            synth.cancel();
+            const utterance = new Utterance(inputText);
+            utterance.lang = 'en-US';
+            utterance.rate = 1;
+            utterance.pitch = 1;
+
+            const voices = synth.getVoices?.() || [];
+            const preferredVoice = voices.find(v => /en-US/i.test(v.lang) && /male|guy|david|mark|ryan/i.test(v.name));
+            if (preferredVoice) {
+                utterance.voice = preferredVoice;
+            }
+
+            utterance.onend = () => {
+                if (onSpeakingComplete) onSpeakingComplete();
+            };
+
+            utterance.onerror = () => {
+                if (onSpeakingComplete) onSpeakingComplete();
+            };
+
+            synth.speak(utterance);
+        } catch (e) {
+            // Swallow TTS errors to avoid red console noise during demos
+            if (onSpeakingComplete) onSpeakingComplete();
+        }
+    };
+
     const generateVideo = async (inputText) => {
         setIsGenerating(true);
+        setHasError(false);
         try {
-            const response = await fetch('http://localhost:8080/api/did/talk', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    scriptText: inputText,
-                    avatarUrl: avatarUrl || undefined,
-                }),
+            const response = await axios.post('/api/did/talk', {
+                scriptText: inputText,
+                avatarUrl: avatarUrl || undefined,
             });
 
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                console.error('Avatar generation failed:', errorData);
-                return;
-            }
+            const data = response.data || {};
 
-            const data = await response.json();
-            if (data.videoUrl) {
+            // Backend is currently hard-wired to fallback mode.
+            // If a real videoUrl ever arrives in future, we'll play it;
+            // otherwise we treat this as a normal static-avatar flow.
+            if (data.videoUrl && !data.fallback) {
                 setVideoUrl(data.videoUrl);
+            } else {
+                setHasError(true);
+                speakWithTTS(inputText);
             }
         } catch (error) {
-            console.error('Avatar API Error:', error);
+            // Any network / server failure becomes a graceful fallback to static avatar.
+            setHasError(true);
+            speakWithTTS(inputText);
         } finally {
             setIsGenerating(false);
         }
@@ -72,11 +114,18 @@ const DIDAvatar = ({ text, isSpeaking, onSpeakingComplete, avatarUrl }) => {
                     controls={false}
                 />
             ) : (
-                <img
-                    src={avatarUrl || '/interviewer_v3.png'}
-                    alt="AI Interviewer"
-                    className="w-full h-full object-cover"
-                />
+                <div className="relative w-full h-full">
+                    <img
+                        src={avatarUrl || (hasError ? '/interviewer_v2.png' : '/interviewer.png')}
+                        alt="AI Interviewer"
+                        className="w-full h-full object-cover"
+                    />
+                    {hasError && (
+                        <div className="absolute bottom-4 right-4 rounded-full bg-black/70 px-3 py-1 text-[10px] text-white/80">
+                            Voice-only mode
+                        </div>
+                    )}
+                </div>
             )}
         </div>
     );

@@ -46,7 +46,7 @@ const Home = () => {
         formData.append('resume', file);
 
         try {
-            const response = await fetch('http://localhost:8080/api/validate-resume', {
+            const response = await fetch('/api/validate-resume', {
                 method: 'POST',
                 body: formData
             });
