@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import axios from 'axios';
 import DIDAvatar from './DIDAvatar';
 import Feedback from './Feedback';
+import CodeEditor from './CodeEditor';
 
 
 const Interview = () => {
@@ -17,6 +18,9 @@ const Interview = () => {
     const [evaluation, setEvaluation] = useState(null);
     const [transcript, setTranscript] = useState('');
     const [currentAIMessage, setCurrentAIMessage] = useState('');
+    const [currentQuestionType, setCurrentQuestionType] = useState('conceptual');
+    const [currentCodeSnippet, setCurrentCodeSnippet] = useState(null);
+    const [editedCode, setEditedCode] = useState(null);
     const videoRef = useRef(null);
     const recognitionRef = useRef(null);
     const scrollRef = useRef(null);
@@ -37,17 +41,23 @@ const Interview = () => {
                 };
 
                 const res = await axios.post('/api/questions/start', body);
-                const { interviewId, question } = res.data;
+                const { interviewId, question, question_type, code_snippet } = res.data;
 
                 sessionId.current = interviewId;
                 if (typeof window !== 'undefined') {
                     window.localStorage.setItem(storageKey, interviewId);
                 }
 
+                // Set question type and code snippet if present
+                setCurrentQuestionType(question_type || 'conceptual');
+                setCurrentCodeSnippet(code_snippet || null);
+
                 const openingMsg = {
                     id: Date.now(),
                     role: 'assessor',
                     text: question,
+                    question_type: question_type || 'conceptual',
+                    code_snippet: code_snippet || null,
                 };
                 setMessages([openingMsg]);
                 speak(question);
@@ -88,11 +98,18 @@ const Interview = () => {
                 lastAnswer,
             });
 
-            const { question } = res.data;
+            const { question, question_type, code_snippet } = res.data;
+
+            // Update question type and code snippet
+            setCurrentQuestionType(question_type || 'conceptual');
+            setCurrentCodeSnippet(code_snippet || null);
+
             const aiMsg = {
                 id: Date.now(),
                 role: 'assessor',
                 text: question,
+                question_type: question_type || 'conceptual',
+                code_snippet: code_snippet || null,
             };
 
             setMessages(prev => [...prev, aiMsg]);
@@ -174,14 +191,28 @@ const Interview = () => {
     };
 
     const handleUserResponse = async (text) => {
-        setIsThinking(true);
-        const userMsg = { id: Date.now(), role: 'user', text };
+        
+        // Include edited code in the response if available
+        let fullResponse = text;
+        if (editedCode && currentQuestionType !== 'conceptual') {
+            fullResponse = `${text}\n\n[Code Submitted]:\n${editedCode}`;
+        }
+        
+        const userMsg = { 
+            id: Date.now(), 
+            role: 'user', 
+            text: fullResponse,
+            hasCode: editedCode ? true : false
+        };
         setMessages(prev => [...prev, userMsg]);
 
         try {
             // Pass the latest user answer so the backend (Gemini)
             // can generate an adaptive follow-up question.
-            await fetchNextQuestion(text);
+            await fetchNextQuestion(fullResponse);
+            
+            // Reset edited code after submitting
+            setEditedCode(null);
         } catch (err) {
             console.error("API Error:", err);
         } finally {
@@ -190,21 +221,74 @@ const Interview = () => {
         }
     };
 
+    const handleCodeSubmit = (code) => {
+        // Store the edited code to include with the verbal answer
+        setEditedCode(code);
+        console.log('Code captured:', code.substring(0, 100) + '...');
+    };
+
     const handleFinishInterview = async () => {
         setIsEvaluating(true);
         if (isListening) recognitionRef.current.stop();
 
         try {
             if (!sessionId.current) {
+                console.warn('No interview ID available, showing completion message');
+                setEvaluation({
+                    fallback: true,
+                    score: 0,
+                    rating: "Completed",
+                    strengths: ["Interview session created"],
+                    improvements: ["Complete the interview for detailed feedback"],
+                    recommendation: "Thank you for your time. Your interview has been recorded."
+                });
                 setIsEvaluating(false);
                 return;
             }
+            
+            console.log('Requesting evaluation for interview:', sessionId.current);
+            
             const res = await axios.post('/api/evaluate', {
+                interviewId: sessionId.current,
                 sessionId: sessionId.current
             });
-            setEvaluation(res.data);
+            
+            console.log('Evaluation received:', res.data);
+            
+            // Handle both successful and fallback evaluations
+            if (res.data) {
+                setEvaluation(res.data);
+                
+                // Log if using fallback
+                if (res.data.fallback) {
+                    console.log('✅ Interview completed with fallback evaluation');
+                } else {
+                    console.log('✅ Interview completed with AI evaluation');
+                }
+            } else {
+                // Unexpected empty response - provide default
+                setEvaluation({
+                    fallback: true,
+                    score: 50,
+                    rating: "Completed",
+                    strengths: ["Interview process completed"],
+                    improvements: ["Response data unavailable"],
+                    recommendation: "Thank you for completing the interview."
+                });
+            }
         } catch (err) {
-            console.error("Evaluation Error:", err);
+            console.error("Evaluation request failed:", err);
+            
+            // NEVER crash the UI - always show completion
+            setEvaluation({
+                fallback: true,
+                score: 50,
+                rating: "Completed",
+                strengths: ["Interview session completed successfully"],
+                improvements: ["Evaluation service temporarily unavailable"],
+                recommendation: "Thank you for participating in the interview. Your responses have been recorded.",
+                message: "Interview completed - evaluation pending"
+            });
         } finally {
             setIsEvaluating(false);
         }
@@ -310,6 +394,12 @@ const Interview = () => {
                                         <span className="text-lg font-bold tracking-tight text-white">
                                             {isThinking ? 'Analyzing...' : isListening ? 'Listening...' : 'Ready'}
                                         </span>
+                                        {/* Question Type Indicator */}
+                                        {currentQuestionType !== 'conceptual' && (
+                                            <span className="text-[8px] font-bold tracking-widest text-[#5B5BFF] uppercase mt-1">
+                                                {currentQuestionType === 'debugging' ? '🐛 DEBUG MODE' : '💻 CODING MODE'}
+                                            </span>
+                                        )}
                                     </div>
 
                                     <div className="flex items-center gap-8">
@@ -370,6 +460,15 @@ const Interview = () => {
                                             <p className="text-[13px] leading-relaxed text-white/80 font-light">
                                                 {msg.text}
                                             </p>
+                                            
+                                            {/* Code Snippet Display - Only shows if present */}
+                                            {msg.code_snippet && (
+                                                <CodeEditor 
+                                                    initialCode={msg.code_snippet}
+                                                    questionType={msg.question_type}
+                                                    onCodeSubmit={handleCodeSubmit}
+                                                />
+                                            )}
                                         </div>
                                     </div>
                                 ))}

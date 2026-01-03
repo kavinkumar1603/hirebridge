@@ -40,7 +40,7 @@ const Feedback = ({ evaluation, onRestart }) => {
                         {/* Score Card */}
                         <div className="bg-[#1a2332]/80 backdrop-blur-xl px-16 py-12 rounded-[2rem] border border-[#5B5BFF]/20 text-center min-w-[320px]">
                             <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-[0.3em] mb-4">
-                                PLACEMENT PROBABILITY
+                                {evaluation.rating || 'OVERALL SCORE'}
                             </span>
                             <div className="flex items-center justify-center">
                                 <span className="text-7xl md:text-8xl font-black text-white tracking-tighter leading-none">
@@ -48,11 +48,80 @@ const Feedback = ({ evaluation, onRestart }) => {
                                 </span>
                                 <span className="text-3xl md:text-4xl font-black text-[#5B5BFF] ml-2 mt-4">%</span>
                             </div>
+                            
+                            {/* Additional Metrics */}
+                            {(evaluation.totalQuestions || evaluation.answeredQuestions) && (
+                                <div className="mt-6 pt-6 border-t border-white/10">
+                                    <div className="text-xs text-slate-400 mb-2">
+                                        Questions Answered: {evaluation.answeredQuestions || 0} / {evaluation.totalQuestions || 0}
+                                    </div>
+                                    {evaluation.interviewDuration && (
+                                        <div className="text-xs text-slate-400">
+                                            Duration: {evaluation.interviewDuration} minutes
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>
 
                     {/* Cards Grid */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
+
+                        {/* Skill Scores - Only show if available */}
+                        {(evaluation.technicalScore || evaluation.communicationScore || evaluation.problemSolvingScore) && (
+                            <div className="bg-[#1a2332]/60 backdrop-blur-xl rounded-[2rem] p-10 border-t-4 border-blue-500/40 relative overflow-hidden">
+                                <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl -mr-32 -mt-32"></div>
+                                
+                                <div className="relative z-10">
+                                    <div className="w-16 h-16 bg-blue-500/20 text-blue-400 rounded-2xl flex items-center justify-center mb-8">
+                                        <svg className="w-9 h-9" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                        </svg>
+                                    </div>
+
+                                    <h3 className="text-2xl font-black text-white mb-6 uppercase tracking-tight">
+                                        SKILL BREAKDOWN
+                                    </h3>
+
+                                    <div className="space-y-6">
+                                        {evaluation.technicalScore !== undefined && (
+                                            <div>
+                                                <div className="flex justify-between mb-2">
+                                                    <span className="text-slate-300 font-medium">Technical Knowledge</span>
+                                                    <span className="text-white font-bold">{evaluation.technicalScore}/10</span>
+                                                </div>
+                                                <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                                                    <div className="h-full bg-blue-500" style={{width: `${(evaluation.technicalScore / 10) * 100}%`}}></div>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {evaluation.communicationScore !== undefined && (
+                                            <div>
+                                                <div className="flex justify-between mb-2">
+                                                    <span className="text-slate-300 font-medium">Communication</span>
+                                                    <span className="text-white font-bold">{evaluation.communicationScore}/10</span>
+                                                </div>
+                                                <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                                                    <div className="h-full bg-emerald-500" style={{width: `${(evaluation.communicationScore / 10) * 100}%`}}></div>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {evaluation.problemSolvingScore !== undefined && (
+                                            <div>
+                                                <div className="flex justify-between mb-2">
+                                                    <span className="text-slate-300 font-medium">Problem Solving</span>
+                                                    <span className="text-white font-bold">{evaluation.problemSolvingScore}/10</span>
+                                                </div>
+                                                <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                                                    <div className="h-full bg-purple-500" style={{width: `${(evaluation.problemSolvingScore / 10) * 100}%`}}></div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Key Assets Card */}
                         <div className="bg-[#1a2332]/60 backdrop-blur-xl rounded-[2rem] p-10 border-t-4 border-emerald-500/40 relative overflow-hidden">
