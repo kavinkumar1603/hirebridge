@@ -4,6 +4,7 @@ import axios from 'axios';
 import DIDAvatar from './DIDAvatar';
 import Feedback from './Feedback';
 
+
 const Interview = () => {
     const location = useLocation();
     const selectedRole = location.state?.role || 'Software Developer';
@@ -221,7 +222,7 @@ const Interview = () => {
             {/* Background with heavy overlay and blur */}
             <div
                 className="absolute inset-0 bg-cover bg-center bg-no-repeat scale-110"
-                style={{ backgroundImage: "url('/office-bg.png')" }}
+                style={{ backgroundImage: "url('/interviewer.png')" }}
             >
                 <div className="absolute inset-0 bg-black/80 backdrop-blur-2xl"></div>
             </div>
@@ -287,7 +288,7 @@ const Interview = () => {
                                     <div className="flex flex-col items-center gap-1 py-6 bg-gradient-to-t from-black/40 via-black/10 to-transparent">
                                         <div className="flex items-center gap-2 mb-2">
                                             <div className="flex items-end gap-[1px]">
-                                                <div className="w-1 h-2 bg-[#5B5BFF] rounded-sm animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                                                <div className="w-1 h-2 bg-[#5B5BFF] ro`unded-sm animate-bounce" style={{ animationDelay: '0ms' }}></div>
                                                 <div className="w-1 h-3 bg-[#5B5BFF] rounded-sm animate-bounce" style={{ animationDelay: '150ms' }}></div>
                                                 <div className="w-1 h-1 bg-[#5B5BFF] rounded-sm animate-bounce" style={{ animationDelay: '300ms' }}></div>
                                             </div>

@@ -116,7 +116,7 @@ const DIDAvatar = ({ text, isSpeaking, onSpeakingComplete, avatarUrl }) => {
             ) : (
                 <div className="relative w-full h-full">
                     <img
-                        src={avatarUrl || (hasError ? '/interviewer_v2.png' : '/interviewer.png')}
+                        src={avatarUrl || (hasError ? '/interviewer.png' : '/interviewer.png')}
                         alt="AI Interviewer"
                         className="w-full h-full object-cover"
                     />
