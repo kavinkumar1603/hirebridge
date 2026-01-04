@@ -76,7 +76,8 @@ const DIDAvatar = ({ text, isSpeaking, onSpeakingComplete, avatarUrl }) => {
                 speakWithTTS(inputText);
             }
         } catch (error) {
-            // Any network / server failure becomes a graceful fallback to static avatar.
+            // Graceful fallback to TTS when D-ID is unavailable
+            console.log('Using text-to-speech fallback (D-ID unavailable)');
             setHasError(true);
             speakWithTTS(inputText);
         } finally {

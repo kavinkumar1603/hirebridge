@@ -22,10 +22,13 @@ const Interview = () => {
     const [currentCodeSnippet, setCurrentCodeSnippet] = useState(null);
     const [editedCode, setEditedCode] = useState(null);
     const [isWelcomePhase, setIsWelcomePhase] = useState(true);
+    const [silenceCount, setSilenceCount] = useState(0);
     const videoRef = useRef(null);
     const recognitionRef = useRef(null);
     const scrollRef = useRef(null);
     const sessionId = useRef(null);
+    const silenceTimerRef = useRef(null);
+    const lastQuestionTimeRef = useRef(null);
 
     // Start or resume interview on mount / role change
     useEffect(() => {
@@ -116,14 +119,33 @@ const Interview = () => {
                 isFirstQuestion,
             });
 
-            const { question, question_type, code_snippet } = res.data;
+            const { aiResponse, question, question_type, code_snippet } = res.data;
 
+            console.log('📥 Received from backend:', { aiResponse, question, question_type });
+
+            // If there's an AI response to the user's previous answer, show it first
+            if (aiResponse && lastAnswer) {
+                console.log('💬 Displaying AI feedback:', aiResponse);
+                const feedbackMsg = {
+                    id: Date.now(),
+                    role: 'assessor',
+                    text: aiResponse,
+                    isFeedback: true,
+                };
+                setMessages(prev => [...prev, feedbackMsg]);
+                speak(aiResponse);
+                
+                // Wait a moment before showing the next question
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            } else {
+                console.log('⚠️ No AI response to display', { aiResponse, lastAnswer });
+            }
             // Update question type and code snippet
             setCurrentQuestionType(question_type || 'conceptual');
             setCurrentCodeSnippet(code_snippet || null);
 
             const aiMsg = {
-                id: Date.now(),
+                id: Date.now() + 1,
                 role: 'assessor',
                 text: question,
                 question_type: question_type || 'conceptual',
@@ -132,18 +154,84 @@ const Interview = () => {
 
             setMessages(prev => [...prev, aiMsg]);
             speak(question);
+            
+            // Reset silence tracking for new question
+            setSilenceCount(0);
+            lastQuestionTimeRef.current = Date.now();
+            startSilenceDetection();
         } catch (error) {
             console.error('Failed to fetch next question:', error);
             // Graceful fallback so the UI never crashes
             const fallbackMsg = {
                 id: Date.now(),
                 role: 'assessor',
-                text: 'I’m experiencing a technical issue generating the next question. Let’s pause here for a moment.',
+                text: "I'm experiencing a technical issue generating the next question. Let's pause here for a moment.",
             };
             setMessages(prev => [...prev, fallbackMsg]);
             speak(fallbackMsg.text);
         }
     };
+
+    // Silence detection system
+    const startSilenceDetection = () => {
+        if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
+        }
+        silenceTimerRef.current = setTimeout(() => {
+            if (!isListening && silenceCount === 0 && !isSpeaking) {
+                handleSilence();
+            }
+        }, 20000);
+    };
+
+    const handleSilence = () => {
+        const currentCount = silenceCount;
+        setSilenceCount(prev => prev + 1);
+        let reminderMessage = '';
+        
+        if (currentCount === 0) {
+            const firstReminders = [
+                "Take your time, there's no rush.",
+                "Whenever you're ready, you can start."
+            ];
+            reminderMessage = firstReminders[Math.floor(Math.random() * firstReminders.length)];
+            silenceTimerRef.current = setTimeout(() => {
+                if (!isListening && silenceCount === 1 && !isSpeaking) {
+                    handleSilence();
+                }
+            }, 15000);
+        } else if (currentCount === 1) {
+            reminderMessage = "If you'd like, you can explain your thinking step by step.";
+            silenceTimerRef.current = setTimeout(() => {
+                if (!isListening && silenceCount === 2 && !isSpeaking) {
+                    handleSilence();
+                }
+            }, 15000);
+        } else if (currentCount === 2) {
+            reminderMessage = "That's okay — let me rephrase the question to make it clearer.";
+        }
+
+        if (reminderMessage) {
+            const reminderMsg = {
+                id: Date.now(),
+                role: 'assessor',
+                text: reminderMessage,
+                isReminder: true,
+            };
+            setMessages(prev => [...prev, reminderMsg]);
+            speak(reminderMessage);
+        }
+    };
+
+    // Clear silence timer when user responds
+    useEffect(() => {
+        if (isListening || transcript.trim()) {
+            if (silenceTimerRef.current) {
+                clearTimeout(silenceTimerRef.current);
+            }
+            setSilenceCount(0);
+        }
+    }, [isListening, transcript]);
 
     // Initialize Camera
     useEffect(() => {

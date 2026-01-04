@@ -295,6 +295,7 @@ app.post("/api/questions/next", async (req, res) => {
       
       session.history.push({
         question: firstQ.question,
+        topic: firstQ.topic_tag,
         difficulty: firstQ.next_question_difficulty,
         question_type: firstQ.question_type,
         code_snippet: firstQ.code_snippet,
@@ -355,36 +356,52 @@ app.post("/api/questions/next", async (req, res) => {
     
     // Score the last answer using AI - this evaluates EVERY answer
     let score = 5; // Default score
+    let aiResponse = "Good, let's continue."; // Default AI response
+    
     try {
       const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
       
-      const scorePrompt = `Rate this interview answer on a scale of 1-10:
-Question: ${currentQuestion.question}
-Answer: ${lastAnswer}
+      const evaluationPrompt = `You are a professional interviewer. The candidate answered: "${lastAnswer}"
 
-Provide only a number between 1-10. Consider:
-- Technical accuracy
-- Depth of understanding
-- Communication clarity
-- Relevance to the question
+Give a brief 1-sentence acknowledgment starting with: "Alright," "Good," "I see," or "Thanks"
 
-Response format: Just the number (e.g., 7)`;
+Then rate 1-10.
 
-      console.log(`🤖 Evaluating answer for topic: ${currentQuestion.topic}...`);
-      const result = await model.generateContent(scorePrompt);
-      const scoreText = result.response.text().trim();
-      score = parseInt(scoreText.match(/\d+/)?.[0] || "5");
-      score = Math.max(1, Math.min(10, score)); // Clamp between 1-10
+Format:
+Response: [one sentence]
+Score: [number]`;
+
+      console.log(`🤖 Evaluating answer...`);
+      const result = await model.generateContent(evaluationPrompt);
+      const responseText = result.response.text().trim();
       
-      console.log(`📊 Answer evaluated: ${score}/10 for topic: ${currentQuestion.topic}`);
+      console.log(`📝 Raw AI evaluation:`, responseText);
+      
+      // Parse AI response (more flexible parsing)
+      const responseMatch = responseText.match(/Response:\s*(.+?)(?=Score:|$)/is);
+      if (responseMatch) {
+        aiResponse = responseMatch[1].trim().replace(/\n/g, ' ');
+      }
+      
+      // Parse score
+      const scoreMatch = responseText.match(/Score:\s*(\d+)/i);
+      if (scoreMatch) {
+        score = parseInt(scoreMatch[1]);
+        score = Math.max(1, Math.min(10, score));
+      }
+      
+      console.log(`📊 Score: ${score}/10`);
+      console.log(`💬 AI Response: "${aiResponse}"`);
     } catch (scoreError) {
-      console.error("⚠️ Failed to score answer:", scoreError.message);
-      console.log(`📊 Using default score: ${score}/10`);
+      console.error("⚠️ AI evaluation failed:", scoreError.message);
+      aiResponse = "Good, let's move forward.";
+      score = 5;
     }
 
-    // Store the answer with score
+    // Store the answer with score and AI response
     currentQuestion.answer = lastAnswer;
     currentQuestion.score = score;
+    currentQuestion.aiResponse = aiResponse;
     currentQuestion.answeredAt = Date.now();
 
     // Ensure tracking arrays are always initialized and maintained
@@ -422,9 +439,11 @@ Response format: Just the number (e.g., 7)`;
     });
 
     console.log(`✅ Question ${session.currentQuestionIndex + 1} generated (${nextQ.next_question_difficulty}): ${nextQ.topic_tag} [${nextQ.question_type}]`);
+    console.log(`💬 Sending AI Response: "${aiResponse}"`);
 
-    // Build response with all fields (backwards compatible)
+    // Build response with all fields including AI response to previous answer
     const response = {
+      aiResponse: aiResponse || "Good, let's continue.", // Always provide a response
       question: nextQ.question,
       questionNumber: session.currentQuestionIndex + 1,
       question_type: nextQ.question_type,
@@ -437,6 +456,11 @@ Response format: Just the number (e.g., 7)`;
       response.code_snippet = nextQ.code_snippet;
     }
 
+    console.log(`📤 Sending response to frontend:`, { 
+      hasAiResponse: !!response.aiResponse, 
+      aiResponseLength: response.aiResponse?.length 
+    });
+    
     res.json(response);
   } catch (error) {
     console.error("❌ Error generating next question:", error);
