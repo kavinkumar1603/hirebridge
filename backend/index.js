@@ -158,12 +158,26 @@ app.post("/api/did/talk", async (req, res) => {
 // Interview Questions API - Start or resume interview
 app.post("/api/questions/start", (req, res) => {
   try {
-    const { role, interviewId } = req.body;
+    const { role, interviewId, skipWelcome, forceNew } = req.body;
 
-    // Check if existing interview session
-    if (interviewId && interviewSessions[interviewId]) {
+    // If forceNew is true, ignore existing session and create new one
+    if (!forceNew && interviewId && interviewSessions[interviewId]) {
       const session = interviewSessions[interviewId];
       console.log(`📌 Resuming interview session: ${interviewId}`);
+      
+      // If resuming and welcome not shown yet, show welcome
+      if (!session.welcomeShown && !skipWelcome) {
+        session.welcomeShown = true;
+        const welcomeMessage = `Welcome back to HireBridge! I'm glad you're here for the ${session.role} interview. Let me start by asking you a few questions to understand your background and expertise better. Are you ready to begin?`;
+        
+        return res.json({
+          interviewId,
+          isWelcome: true,
+          question: welcomeMessage,
+          message: welcomeMessage,
+          questionNumber: 0
+        });
+      }
       
       // Return the current unanswered question if available
       const currentQuestion = session.history[session.currentQuestionIndex];
@@ -172,51 +186,79 @@ app.post("/api/questions/start", (req, res) => {
         return res.json({
           interviewId,
           question: currentQuestion.question,
+          question_type: currentQuestion.question_type,
+          code_snippet: currentQuestion.code_snippet,
           questionNumber: session.currentQuestionIndex + 1,
         });
       }
     }
 
     // Create new interview session
-    const newInterviewId = interviewId || `interview_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const newInterviewId = `interview_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     
-    // Generate first question
-    const firstQ = generateNextQuestion({ role: role || "Software Developer" });
-    
-    interviewSessions[newInterviewId] = {
-      role: role || "Software Developer",
-      history: [{
+    // If skipWelcome is true, generate first question immediately
+    if (skipWelcome) {
+      const firstQ = generateNextQuestion({ role: role || "Software Developer" });
+      
+      interviewSessions[newInterviewId] = {
+        role: role || "Software Developer",
+        welcomeShown: true,
+        history: [{
+          question: firstQ.question,
+          topic: firstQ.topic_tag,
+          difficulty: firstQ.next_question_difficulty,
+          question_type: firstQ.question_type,
+          code_snippet: firstQ.code_snippet,
+          timestamp: Date.now(),
+        }],
+        currentQuestionIndex: 0,
+        askedTopics: [firstQ.topic_tag],
+        askedQuestions: [firstQ.question], // Track actual question text
+        startTime: Date.now(),
+      };
+
+      console.log(`✅ New interview started: ${newInterviewId} for role: ${role} (skipped welcome)`);
+      console.log(`📝 First question (${firstQ.next_question_difficulty}): ${firstQ.topic_tag} [${firstQ.question_type}]`);
+
+      const response = {
+        interviewId: newInterviewId,
         question: firstQ.question,
-        topic: firstQ.topic_tag,
-        difficulty: firstQ.next_question_difficulty,
+        questionNumber: 1,
         question_type: firstQ.question_type,
-        code_snippet: firstQ.code_snippet,
-        timestamp: Date.now(),
-      }],
-      currentQuestionIndex: 0,
-      askedTopics: [firstQ.topic_tag],
-      startTime: Date.now(),
-    };
+        topic_tag: firstQ.topic_tag,
+        difficulty: firstQ.next_question_difficulty,
+      };
 
-    console.log(`✅ New interview started: ${newInterviewId} for role: ${role}`);
-    console.log(`📝 First question (${firstQ.next_question_difficulty}): ${firstQ.topic_tag} [${firstQ.question_type}]`);
+      if (firstQ.code_snippet) {
+        response.code_snippet = firstQ.code_snippet;
+      }
 
-    // Build response with all fields (backwards compatible)
-    const response = {
-      interviewId: newInterviewId,
-      question: firstQ.question,
-      questionNumber: 1,
-      question_type: firstQ.question_type,
-      topic_tag: firstQ.topic_tag,
-      difficulty: firstQ.next_question_difficulty,
-    };
-
-    // Add code_snippet only if present (optional field)
-    if (firstQ.code_snippet) {
-      response.code_snippet = firstQ.code_snippet;
+      return res.json(response);
     }
 
-    res.json(response);
+    // Show welcome message for new sessions
+    interviewSessions[newInterviewId] = {
+      role: role || "Software Developer",
+      welcomeShown: false,
+      history: [],
+      currentQuestionIndex: 0,
+      askedTopics: [],
+      askedQuestions: [], // Track actual question texts to prevent repetition
+      startTime: Date.now(),
+      createdAt: Date.now(),
+    };
+
+    const welcomeMessage = `Hello and welcome to HireBridge! I'm excited to interview you for the ${role || "Software Developer"} position. This will be a conversational interview where I'll ask you questions to assess your technical skills, problem-solving abilities, and experience. Each interview session is unique, so you'll receive fresh questions tailored to your performance. Feel free to take your time with each answer, and don't hesitate to ask for clarification if needed. Are you ready to begin?`;
+
+    console.log(`✅ New interview created with welcome: ${newInterviewId} for role: ${role}`);
+
+    res.json({
+      interviewId: newInterviewId,
+      isWelcome: true,
+      question: welcomeMessage,
+      message: welcomeMessage,
+      questionNumber: 0
+    });
   } catch (error) {
     console.error("❌ Error starting interview:", error);
     res.status(500).json({ 
@@ -229,13 +271,59 @@ app.post("/api/questions/start", (req, res) => {
 // Interview Questions API - Get next question
 app.post("/api/questions/next", async (req, res) => {
   try {
-    const { interviewId, role, lastAnswer } = req.body;
+    const { interviewId, role, lastAnswer, isFirstQuestion } = req.body;
 
     if (!interviewId || !interviewSessions[interviewId]) {
       return res.status(400).json({ error: "Invalid interview session" });
     }
 
     const session = interviewSessions[interviewId];
+    
+    // If this is the first question after welcome, generate it
+    if (isFirstQuestion && session.history.length === 0) {
+      console.log(`🎬 Generating first question after welcome for: ${interviewId}`);
+      
+      // Ensure tracking arrays are initialized
+      session.askedTopics = session.askedTopics || [];
+      session.askedQuestions = session.askedQuestions || [];
+      
+      const firstQ = generateNextQuestion({ 
+        role: session.role,
+        askedTopics: session.askedTopics,
+        askedQuestions: session.askedQuestions
+      });
+      
+      session.history.push({
+        question: firstQ.question,
+        topic: firstQ.topic_tag,
+        difficulty: firstQ.next_question_difficulty,
+        question_type: firstQ.question_type,
+        code_snippet: firstQ.code_snippet,
+        timestamp: Date.now(),
+      });
+      
+      // Track both topic and question text to avoid repetition
+      session.askedTopics.push(firstQ.topic_tag);
+      session.askedQuestions.push(firstQ.question);
+      session.welcomeShown = true;
+      
+      console.log(`📝 First question generated: ${firstQ.topic_tag} [${firstQ.question_type}]`);
+      
+      const response = {
+        question: firstQ.question,
+        questionNumber: 1,
+        question_type: firstQ.question_type,
+        topic_tag: firstQ.topic_tag,
+        difficulty: firstQ.next_question_difficulty,
+      };
+      
+      if (firstQ.code_snippet) {
+        response.code_snippet = firstQ.code_snippet;
+      }
+      
+      return res.json(response);
+    }
+    
     const currentQuestion = session.history[session.currentQuestionIndex];
     
     // If there's no answer provided, return the current question
@@ -243,6 +331,8 @@ app.post("/api/questions/next", async (req, res) => {
       console.log(`⚠️ No answer provided, returning current question`);
       return res.json({
         question: currentQuestion.question,
+        question_type: currentQuestion.question_type,
+        code_snippet: currentQuestion.code_snippet,
         questionNumber: session.currentQuestionIndex + 1,
       });
     }
@@ -257,12 +347,14 @@ app.post("/api/questions/next", async (req, res) => {
         const nextExisting = session.history[session.currentQuestionIndex];
         return res.json({
           question: nextExisting.question,
+          question_type: nextExisting.question_type,
+          code_snippet: nextExisting.code_snippet,
           questionNumber: session.currentQuestionIndex + 1,
         });
       }
     }
     
-    // Score the last answer using AI
+    // Score the last answer using AI - this evaluates EVERY answer
     let score = 5; // Default score
     try {
       const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
@@ -279,14 +371,16 @@ Provide only a number between 1-10. Consider:
 
 Response format: Just the number (e.g., 7)`;
 
+      console.log(`🤖 Evaluating answer for topic: ${currentQuestion.topic}...`);
       const result = await model.generateContent(scorePrompt);
       const scoreText = result.response.text().trim();
       score = parseInt(scoreText.match(/\d+/)?.[0] || "5");
       score = Math.max(1, Math.min(10, score)); // Clamp between 1-10
       
-      console.log(`📊 Answer scored: ${score}/10 for topic: ${currentQuestion.topic}`);
+      console.log(`📊 Answer evaluated: ${score}/10 for topic: ${currentQuestion.topic}`);
     } catch (scoreError) {
       console.error("⚠️ Failed to score answer:", scoreError.message);
+      console.log(`📊 Using default score: ${score}/10`);
     }
 
     // Store the answer with score
@@ -294,16 +388,26 @@ Response format: Just the number (e.g., 7)`;
     currentQuestion.score = score;
     currentQuestion.answeredAt = Date.now();
 
-    // Generate next question based on performance, avoiding recently asked topics
+    // Ensure tracking arrays are always initialized and maintained
+    session.askedTopics = session.askedTopics || [];
+    session.askedQuestions = session.askedQuestions || [];
+    
     const nextQ = generateNextQuestion({
       role: session.role,
       lastScore: score,
       lastTopic: currentQuestion.topic,
+      askedTopics: session.askedTopics,
+      askedQuestions: session.askedQuestions
     });
 
-    // Make sure we don't repeat the same topic consecutively
-    session.askedTopics = session.askedTopics || [];
-    session.askedTopics.push(nextQ.topic_tag);
+    // Track both topic and question text to prevent repetition
+    if (!session.askedTopics.includes(nextQ.topic_tag)) {
+      session.askedTopics.push(nextQ.topic_tag);
+    }
+    if (!session.askedQuestions.includes(nextQ.question)) {
+      session.askedQuestions.push(nextQ.question);
+    }
+    console.log(`🔖 Questions asked so far: ${session.askedQuestions.length} unique questions`);
 
     // Move to next question index
     session.currentQuestionIndex++;
@@ -319,7 +423,6 @@ Response format: Just the number (e.g., 7)`;
     });
 
     console.log(`✅ Question ${session.currentQuestionIndex + 1} generated (${nextQ.next_question_difficulty}): ${nextQ.topic_tag} [${nextQ.question_type}]`);
-    console.log(`📋 Topics asked so far: ${session.askedTopics.join(', ')}`);
 
     // Build response with all fields (backwards compatible)
     const response = {
@@ -689,7 +792,7 @@ app.post("/api/evaluate", async (req, res) => {
 
       // Try Gemini evaluation
       try {
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
         const prompt = `You are an expert technical interviewer evaluating a candidate for a ${interviewSession.role || 'Software Developer'} position.
 

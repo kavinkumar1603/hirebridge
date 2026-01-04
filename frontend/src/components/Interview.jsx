@@ -21,6 +21,7 @@ const Interview = () => {
     const [currentQuestionType, setCurrentQuestionType] = useState('conceptual');
     const [currentCodeSnippet, setCurrentCodeSnippet] = useState(null);
     const [editedCode, setEditedCode] = useState(null);
+    const [isWelcomePhase, setIsWelcomePhase] = useState(true);
     const videoRef = useRef(null);
     const recognitionRef = useRef(null);
     const scrollRef = useRef(null);
@@ -41,26 +42,40 @@ const Interview = () => {
                 };
 
                 const res = await axios.post('/api/questions/start', body);
-                const { interviewId, question, question_type, code_snippet } = res.data;
+                const { interviewId, question, isWelcome, question_type, code_snippet } = res.data;
 
                 sessionId.current = interviewId;
                 if (typeof window !== 'undefined') {
                     window.localStorage.setItem(storageKey, interviewId);
                 }
 
-                // Set question type and code snippet if present
-                setCurrentQuestionType(question_type || 'conceptual');
-                setCurrentCodeSnippet(code_snippet || null);
+                // Check if this is a welcome message
+                if (isWelcome) {
+                    setIsWelcomePhase(true);
+                    const welcomeMsg = {
+                        id: Date.now(),
+                        role: 'assessor',
+                        text: question,
+                        isWelcome: true,
+                    };
+                    setMessages([welcomeMsg]);
+                    speak(question);
+                } else {
+                    // Regular question
+                    setIsWelcomePhase(false);
+                    setCurrentQuestionType(question_type || 'conceptual');
+                    setCurrentCodeSnippet(code_snippet || null);
 
-                const openingMsg = {
-                    id: Date.now(),
-                    role: 'assessor',
-                    text: question,
-                    question_type: question_type || 'conceptual',
-                    code_snippet: code_snippet || null,
-                };
-                setMessages([openingMsg]);
-                speak(question);
+                    const openingMsg = {
+                        id: Date.now(),
+                        role: 'assessor',
+                        text: question,
+                        question_type: question_type || 'conceptual',
+                        code_snippet: code_snippet || null,
+                    };
+                    setMessages([openingMsg]);
+                    speak(question);
+                }
             } catch (error) {
                 console.error('Failed to start interview:', error);
                 const fallback = 'Welcome to HireBridge. Let’s begin with a quick introduction. Could you briefly walk me through your background for this role?';
@@ -68,8 +83,10 @@ const Interview = () => {
                     id: Date.now(),
                     role: 'assessor',
                     text: fallback,
+                    isWelcome: true,
                 };
                 setMessages([openingMsg]);
+                setIsWelcomePhase(true);
                 speak(fallback);
             }
         };
@@ -86,7 +103,7 @@ const Interview = () => {
     }, [messages, transcript]);
 
     // Fetch next dynamic question based on last answer
-    const fetchNextQuestion = async (lastAnswer = null) => {
+    const fetchNextQuestion = async (lastAnswer = null, isFirstQuestion = false) => {
         try {
             if (!sessionId.current) {
                 return;
@@ -96,6 +113,7 @@ const Interview = () => {
                 interviewId: sessionId.current,
                 role: selectedRole,
                 lastAnswer,
+                isFirstQuestion,
             });
 
             const { question, question_type, code_snippet } = res.data;
@@ -207,9 +225,15 @@ const Interview = () => {
         setMessages(prev => [...prev, userMsg]);
 
         try {
-            // Pass the latest user answer so the backend (Gemini)
-            // can generate an adaptive follow-up question.
-            await fetchNextQuestion(fullResponse);
+            // If in welcome phase, fetch the first real question
+            if (isWelcomePhase) {
+                setIsWelcomePhase(false);
+                await fetchNextQuestion(fullResponse, true); // Pass true to indicate first question
+            } else {
+                // Pass the latest user answer so the backend (Gemini)
+                // can generate an adaptive follow-up question.
+                await fetchNextQuestion(fullResponse);
+            }
             
             // Reset edited code after submitting
             setEditedCode(null);
@@ -292,6 +316,17 @@ const Interview = () => {
         } finally {
             setIsEvaluating(false);
         }
+    };
+
+    const handleNewInterview = () => {
+        // Clear localStorage
+        const storageKey = 'hirebridge_interview_id';
+        if (typeof window !== 'undefined') {
+            window.localStorage.removeItem(storageKey);
+        }
+        
+        // Reload the page to restart interview
+        window.location.reload();
     };
 
     const speak = (text) => {
@@ -424,6 +459,14 @@ const Interview = () => {
                                         >
                                             Finish Assessment
                                         </button>
+                                        
+                                        {/* <button
+                                            onClick={handleNewInterview}
+                                            className="px-6 py-3 rounded-full border border-blue-500/20 bg-blue-500/10 text-blue-500 text-[10px] font-bold tracking-widest uppercase hover:bg-blue-500 hover:text-white transition-all"
+                                            title="Start a fresh interview with new questions"
+                                        >
+                                            New Interview
+                                        </button> */}
                                     </div>
 
                                     <div className="flex items-center gap-1.5 opacity-40">

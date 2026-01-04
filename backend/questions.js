@@ -149,7 +149,7 @@ function pickNextDifficulty(lastScore) {
   return "hard";
 }
 
-function generateNextQuestion({ role, lastScore = null, lastTopic = null }) {
+function generateNextQuestion({ role, lastScore = null, lastTopic = null, askedTopics = [], askedQuestions = [] }) {
   if (!ALLOWED_ROLES.includes(role)) {
     throw new Error(`Unsupported role: ${role}`);
   }
@@ -164,20 +164,46 @@ function generateNextQuestion({ role, lastScore = null, lastTopic = null }) {
   // Filter by difficulty first
   let candidates = questions.filter((q) => q.difficulty === targetDifficulty);
   
-  // Try to avoid repeating the same topic
-  if (lastTopic) {
-    const nonRepeats = candidates.filter((q) => q.topic !== lastTopic);
-    if (nonRepeats.length > 0) {
-      candidates = nonRepeats;
+  // CRITICAL: Filter out questions that have already been asked (by exact text match)
+  if (askedQuestions && askedQuestions.length > 0) {
+    const notAskedYet = candidates.filter((q) => !askedQuestions.includes(q.text));
+    if (notAskedYet.length > 0) {
+      candidates = notAskedYet;
+      console.log(`✅ ${candidates.length} new questions available at ${targetDifficulty} difficulty`);
+    } else {
+      // All questions at this difficulty have been asked, log warning
+      console.log(`⚠️ All ${targetDifficulty} questions already asked, may need to reuse or expand question bank`);
+    }
+  }
+  
+  // Secondary filter: Try to avoid repeating topics
+  if (askedTopics && askedTopics.length > 0 && candidates.length > 1) {
+    const notAskedTopics = candidates.filter((q) => !askedTopics.includes(q.topic));
+    if (notAskedTopics.length > 0) {
+      candidates = notAskedTopics;
+    } else if (lastTopic) {
+      // If all topics asked, at least avoid the immediate last topic
+      const nonRepeats = candidates.filter((q) => q.topic !== lastTopic);
+      if (nonRepeats.length > 0) {
+        candidates = nonRepeats;
+      }
     }
   }
 
-  // If we still have no candidates, expand to all questions with target difficulty
+  // If we filtered too much and have no candidates, expand back to unused questions at target difficulty
   if (candidates.length === 0) {
-    candidates = questions.filter((q) => q.difficulty === targetDifficulty);
+    candidates = questions.filter((q) => 
+      q.difficulty === targetDifficulty && !askedQuestions.includes(q.text)
+    );
   }
   
-  // If still no candidates (shouldn't happen), use all questions
+  // If still no candidates (all questions asked), use all questions at target difficulty
+  if (candidates.length === 0) {
+    candidates = questions.filter((q) => q.difficulty === targetDifficulty);
+    console.log(`⚠️ Reusing questions - all ${targetDifficulty} questions have been asked before`);
+  }
+  
+  // Last resort: use all questions
   if (candidates.length === 0) {
     candidates = questions;
   }
