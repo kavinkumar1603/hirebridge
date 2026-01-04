@@ -248,7 +248,7 @@ app.post("/api/questions/start", (req, res) => {
       createdAt: Date.now(),
     };
 
-    const welcomeMessage = `Hello and welcome to HireBridge! I'm excited to interview you for the ${role || "Software Developer"} position. This will be a conversational interview where I'll ask you questions to assess your technical skills, problem-solving abilities, and experience. Each interview session is unique, so you'll receive fresh questions tailored to your performance. Feel free to take your time with each answer, and don't hesitate to ask for clarification if needed. Are you ready to begin?`;
+    const welcomeMessage = `Welcome to HireBridge! I'll be interviewing you for the ${role || "Software Developer"} position. I'll ask questions to assess your technical skills and experience. Take your time with each answer. Ready to begin?`;
 
     console.log(`✅ New interview created with welcome: ${newInterviewId} for role: ${role}`);
 
@@ -282,7 +282,7 @@ app.post("/api/questions/next", async (req, res) => {
     // If this is the first question after welcome, generate it
     if (isFirstQuestion && session.history.length === 0) {
       console.log(`🎬 Generating first question after welcome for: ${interviewId}`);
-      
+     
       // Ensure tracking arrays are initialized
       session.askedTopics = session.askedTopics || [];
       session.askedQuestions = session.askedQuestions || [];
@@ -295,7 +295,6 @@ app.post("/api/questions/next", async (req, res) => {
       
       session.history.push({
         question: firstQ.question,
-        topic: firstQ.topic_tag,
         difficulty: firstQ.next_question_difficulty,
         question_type: firstQ.question_type,
         code_snippet: firstQ.code_snippet,
